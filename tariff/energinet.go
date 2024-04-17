@@ -1,8 +1,10 @@
 package tariff
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -17,9 +19,10 @@ import (
 
 type Energinet struct {
 	*embed
-	log    *util.Logger
-	region string
-	data   *util.Monitor[api.Rates]
+	log         *util.Logger
+	region      string
+	chargeowner *energinet.AdditionalChargeOwner
+	data        *util.Monitor[api.Rates]
 }
 
 var _ api.Tariff = (*Energinet)(nil)
@@ -30,8 +33,9 @@ func init() {
 
 func NewEnerginetFromConfig(other map[string]interface{}) (api.Tariff, error) {
 	var cc struct {
-		embed  `mapstructure:",squash"`
-		Region string
+		embed       `mapstructure:",squash"`
+		Region      string
+		ChargeOwner string
 	}
 
 	if err := util.DecodeOther(other, &cc); err != nil {
@@ -49,6 +53,12 @@ func NewEnerginetFromConfig(other map[string]interface{}) (api.Tariff, error) {
 		data:   util.NewMonitor[api.Rates](2 * time.Hour),
 	}
 
+	if cc.ChargeOwner == "" {
+		t.log.INFO.Println("No ChargeOwner configured - skipping")
+	} else {
+		t.chargeowner = energinet.AdditionalChargeOwners[cc.ChargeOwner]
+	}
+
 	done := make(chan error)
 	go t.run(done)
 	err := <-done
@@ -63,10 +73,48 @@ func (t *Energinet) run(done chan error) {
 
 	tick := time.NewTicker(time.Hour)
 	for ; true; <-tick.C {
+
+		if t.chargeowner != nil {
+			var additionalCharge energinet.AdditionalCharge
+
+			jsonChargeTypeCode, _ := json.Marshal(t.chargeowner.ChargeTypeCode)
+			jsonChargeType, _ := json.Marshal(t.chargeowner.ChargeType)
+			dhFilter := fmt.Sprintf(
+				energinet.DatahubPricelistFilter,
+				jsonChargeTypeCode,
+				t.chargeowner.GLN,
+				jsonChargeType,
+			)
+			dhUri := fmt.Sprintf(energinet.DatahubPricelistURI, url.QueryEscape(dhFilter))
+			t.log.TRACE.Println("Constructed URI for DatahubPricelist: " + dhUri)
+
+			if err := backoff.Retry(func() error {
+				err := client.GetJSON(dhUri, &additionalCharge)
+				t.log.TRACE.Printf("%#v",additionalCharge)
+				if err != nil {
+					t.log.ERROR.Println(err.Error())
+				}
+				return backoffPermanentError(err)
+			}, bo); err != nil {
+				once.Do(func() { done <- err })
+				t.log.ERROR.Println(err)
+				continue
+			}
+
+			for _, record := range additionalCharge.Records {
+				if energinet.AdditionalChargeRecordInRange(record, time.Now()) {
+					t.log.TRACE.Printf("Record in range")
+					t.log.TRACE.Printf("%#v\n", record)
+					//TODO: Implement from here!
+				}
+			}
+
+		}
+
 		var res energinet.Prices
 
 		ts := time.Now().Truncate(time.Hour)
-		uri := fmt.Sprintf(energinet.URI,
+		uri := fmt.Sprintf(energinet.ElspotpricesURI,
 			ts.Format(energinet.TimeFormat),
 			ts.Add(24*time.Hour).Format(energinet.TimeFormat),
 			t.region)
@@ -82,7 +130,7 @@ func (t *Energinet) run(done chan error) {
 
 		data := make(api.Rates, 0, len(res.Records))
 		for _, r := range res.Records {
-			date, _ := time.Parse("2006-01-02T15:04:05", r.HourUTC)
+			date, _ := time.Parse(energinet.TimeFormatSecond, r.HourUTC)
 			ar := api.Rate{
 				Start: date.Local(),
 				End:   date.Add(time.Hour).Local(),
