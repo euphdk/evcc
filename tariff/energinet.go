@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -74,8 +75,10 @@ func (t *Energinet) run(done chan error) {
 	tick := time.NewTicker(time.Hour)
 	for ; true; <-tick.C {
 
+		additionalCharges := make(map[int64]float64)
+
 		if t.chargeowner != nil {
-			var additionalCharge energinet.AdditionalCharge
+			var additionalCharge energinet.AdditionalChargesFromAPI
 
 			jsonChargeTypeCode, _ := json.Marshal(t.chargeowner.ChargeTypeCode)
 			jsonChargeType, _ := json.Marshal(t.chargeowner.ChargeType)
@@ -101,13 +104,13 @@ func (t *Energinet) run(done chan error) {
 				continue
 			}
 
-			for _, record := range additionalCharge.Records {
-				if energinet.AdditionalChargeRecordInRange(record, time.Now()) {
-					t.log.TRACE.Printf("Record in range")
-					t.log.TRACE.Printf("%#v\n", record)
-					//TODO: Implement from here!
-				}
-			}
+			additionalCharges = energinet.ParseAdditionalChargeRecord(additionalCharge.Records, time.Now())
+			additionalChargesTomorrow := energinet.ParseAdditionalChargeRecord(additionalCharge.Records, time.Now().Add(24 * time.Hour))
+
+			maps.Copy(additionalCharges, additionalChargesTomorrow)
+
+			t.log.TRACE.Printf("%#v", additionalCharges)
+
 
 		}
 
@@ -131,10 +134,19 @@ func (t *Energinet) run(done chan error) {
 		data := make(api.Rates, 0, len(res.Records))
 		for _, r := range res.Records {
 			date, _ := time.Parse(energinet.TimeFormatSecond, r.HourUTC)
+
+			var addtionalCharge float64
+
+			if t.chargeowner != nil {
+				addtionalCharge = additionalCharges[date.Unix()]
+			} else {
+				addtionalCharge = 0
+			}
+
 			ar := api.Rate{
 				Start: date.Local(),
 				End:   date.Add(time.Hour).Local(),
-				Price: t.totalPrice(r.SpotPriceDKK / 1e3),
+				Price: t.totalPrice((r.SpotPriceDKK / 1e3) + addtionalCharge),
 			}
 			data = append(data, ar)
 		}

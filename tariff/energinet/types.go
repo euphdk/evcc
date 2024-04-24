@@ -1,5 +1,7 @@
 package energinet
 
+import "time"
+
 const (
 	ElspotpricesURI        = "https://api.energidataservice.dk/dataset/Elspotprices?offset=0&start=%s&end=%s&filter={\"PriceArea\":[\"%s\"]}&timezone=dk&limit=48"
 	TimeFormat             = "2006-01-02T15:04" // RFC3339 short
@@ -20,7 +22,7 @@ type PriceInfo struct {
 	SpotPriceEUR float64
 }
 
-type AdditionalCharge struct {
+type AdditionalChargesFromAPI struct {
 	Records []AdditionalChargeRecord `json:"records"`
 }
 
@@ -61,4 +63,13 @@ type AdditionalChargeRecord struct {
 	TransparentInvoicing int
 	TaxIndicator         int
 	ResolutionDuration   string
+}
+
+type AdditionalCharges struct {
+	AdditionalChargePriceInfo []AdditionalChargePriceInfo
+}
+
+type AdditionalChargePriceInfo struct {
+	Hour time.Time
+	Price float64
 }
