@@ -20,10 +20,12 @@ import (
 
 type Energinet struct {
 	*embed
-	log         *util.Logger
-	region      string
-	chargeowner *energinet.AdditionalChargeOwner
-	data        *util.Monitor[api.Rates]
+	log            *util.Logger
+	region         string
+	chargeowner    *energinet.AdditionalChargeOwner
+	electricitytax float64
+	vat            float64
+	data           *util.Monitor[api.Rates]
 }
 
 var _ api.Tariff = (*Energinet)(nil)
@@ -34,9 +36,11 @@ func init() {
 
 func NewEnerginetFromConfig(other map[string]interface{}) (api.Tariff, error) {
 	var cc struct {
-		embed       `mapstructure:",squash"`
-		Region      string
-		ChargeOwner string
+		embed          `mapstructure:",squash"`
+		Region         string
+		ChargeOwner    string
+		ElectricityTax float64
+		VAT            float64
 	}
 
 	if err := util.DecodeOther(other, &cc); err != nil {
@@ -93,7 +97,7 @@ func (t *Energinet) run(done chan error) {
 
 			if err := backoff.Retry(func() error {
 				err := client.GetJSON(dhUri, &additionalCharge)
-				t.log.TRACE.Printf("%#v",additionalCharge)
+				t.log.TRACE.Printf("%#v", additionalCharge)
 				if err != nil {
 					t.log.ERROR.Println(err.Error())
 				}
@@ -105,12 +109,11 @@ func (t *Energinet) run(done chan error) {
 			}
 
 			additionalCharges = energinet.ParseAdditionalChargeRecord(additionalCharge.Records, time.Now())
-			additionalChargesTomorrow := energinet.ParseAdditionalChargeRecord(additionalCharge.Records, time.Now().Add(24 * time.Hour))
+			additionalChargesTomorrow := energinet.ParseAdditionalChargeRecord(additionalCharge.Records, time.Now().Add(24*time.Hour))
 
 			maps.Copy(additionalCharges, additionalChargesTomorrow)
 
 			t.log.TRACE.Printf("%#v", additionalCharges)
-
 
 		}
 
@@ -137,16 +140,18 @@ func (t *Energinet) run(done chan error) {
 
 			var addtionalCharge float64
 
+			addtionalCharge = 0.0 //TODO - Tax
+
 			if t.chargeowner != nil {
-				addtionalCharge = additionalCharges[date.Unix()]
+				addtionalCharge = additionalCharges[date.Unix()] + addtionalCharge
 			} else {
-				addtionalCharge = 0
+				addtionalCharge = 0 + addtionalCharge
 			}
 
 			ar := api.Rate{
 				Start: date.Local(),
 				End:   date.Add(time.Hour).Local(),
-				Price: t.totalPrice((r.SpotPriceDKK / 1e3) + addtionalCharge),
+				Price: t.totalPrice(((r.SpotPriceDKK / 1e3) + addtionalCharge)) * 1.25, // TODO - VAT
 			}
 			data = append(data, ar)
 		}
