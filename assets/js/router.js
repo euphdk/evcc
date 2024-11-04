@@ -1,8 +1,7 @@
 import { createRouter, createWebHashHistory } from "vue-router";
 import Modal from "bootstrap/js/dist/modal";
-import Main from "./views/Main.vue";
 import { ensureCurrentLocaleMessages } from "./i18n";
-import { openLoginModal, updateAuthStatus, isLoggedIn } from "./auth";
+import { openLoginModal, statusUnknown, updateAuthStatus, isLoggedIn, isConfigured } from "./auth";
 
 function hideAllModals() {
   [...document.querySelectorAll(".modal.show")].forEach((modal) => {
@@ -18,7 +17,10 @@ function hideAllModals() {
 
 async function ensureAuth(to) {
   await updateAuthStatus();
-  if (!isLoggedIn()) {
+  if (!isConfigured()) {
+    return false;
+  }
+  if (!isLoggedIn() && !statusUnknown()) {
     openLoginModal(to.path);
     return false;
   }
@@ -29,7 +31,7 @@ export default function setupRouter(i18n) {
   const router = createRouter({
     history: createWebHashHistory(),
     routes: [
-      { path: "/", component: Main, props: true },
+      { path: "/", component: () => import("./views/Main.vue"), props: true },
       {
         path: "/config",
         component: () => import("./views/Config.vue"),
@@ -38,12 +40,13 @@ export default function setupRouter(i18n) {
       },
       {
         path: "/sessions",
-        component: () => import("./views/ChargingSessions.vue"),
+        component: () => import("./views/Sessions.vue"),
         props: (route) => {
-          const { month, year, loadpoint, vehicle } = route.query;
+          const { month, year, loadpoint, vehicle, period } = route.query;
           return {
             month: month ? parseInt(month, 10) : undefined,
             year: year ? parseInt(year, 10) : undefined,
+            period,
             loadpointFilter: loadpoint,
             vehicleFilter: vehicle,
           };
@@ -53,10 +56,13 @@ export default function setupRouter(i18n) {
         path: "/log",
         component: () => import("./views/Log.vue"),
         beforeEnter: ensureAuth,
-      },
-      {
-        path: "/error",
-        component: () => import("./views/StartupError.vue"),
+        props: (route) => {
+          const { areas, level } = route.query;
+          return {
+            areas: areas ? areas.split(",") : undefined,
+            level,
+          };
+        },
       },
     ],
   });

@@ -62,7 +62,7 @@ func (m *MQTT) encode(v interface{}) string {
 		return strconv.FormatInt(val.Unix(), 10)
 	case time.Duration:
 		// must be before stringer to convert to seconds instead of string
-		return fmt.Sprintf("%d", int64(val.Seconds()))
+		return strconv.Itoa(int(val.Seconds()))
 	case fmt.Stringer:
 		return val.String()
 	default:
@@ -107,9 +107,12 @@ func (m *MQTT) publishComplex(topic string, retained bool, payload interface{}) 
 		}
 
 	case reflect.Pointer:
-		if reflect.ValueOf(payload).IsNil() {
-			payload = nil
+		if !reflect.ValueOf(payload).IsNil() {
+			m.publishComplex(topic, retained, reflect.Indirect(reflect.ValueOf(payload)).Interface())
+			return
 		}
+
+		payload = nil
 		fallthrough
 
 	default:
@@ -170,10 +173,17 @@ func (m *MQTT) Listen(site site.API) error {
 
 func (m *MQTT) listenSiteSetters(topic string, site site.API) error {
 	for _, s := range []setter{
-		{"/prioritySoc", floatSetter(site.SetPrioritySoc)},
 		{"/bufferSoc", floatSetter(site.SetBufferSoc)},
 		{"/bufferStartSoc", floatSetter(site.SetBufferStartSoc)},
+		{"/batteryDischargeControl", boolSetter(site.SetBatteryDischargeControl)},
+		{"/prioritySoc", floatSetter(site.SetPrioritySoc)},
 		{"/residualPower", floatSetter(site.SetResidualPower)},
+		{"/smartCostLimit", floatPtrSetter(pass(func(limit *float64) {
+			for _, lp := range site.Loadpoints() {
+				lp.SetSmartCostLimit(limit)
+			}
+		}))},
+		{"/batteryGridChargeLimit", floatPtrSetter(pass(site.SetBatteryGridChargeLimit))},
 	} {
 		if err := m.Handler.ListenSetter(topic+s.topic, s.fun); err != nil {
 			return err
@@ -193,7 +203,10 @@ func (m *MQTT) listenLoadpointSetters(topic string, site site.API, lp loadpoint.
 		{"/limitEnergy", floatSetter(pass(lp.SetLimitEnergy))},
 		{"/enableThreshold", floatSetter(pass(lp.SetEnableThreshold))},
 		{"/disableThreshold", floatSetter(pass(lp.SetDisableThreshold))},
-		{"/smartCostLimit", floatSetter(pass(lp.SetSmartCostLimit))},
+		{"/enableDelay", durationSetter(pass(lp.SetEnableDelay))},
+		{"/disableDelay", durationSetter(pass(lp.SetDisableDelay))},
+		{"/smartCostLimit", floatPtrSetter(pass(lp.SetSmartCostLimit))},
+		{"/batteryBoost", boolSetter(lp.SetBatteryBoost)},
 		{"/planEnergy", func(payload string) error {
 			var plan struct {
 				Time  time.Time `json:"time"`

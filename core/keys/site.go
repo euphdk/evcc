@@ -28,18 +28,21 @@ const (
 	TariffPriceHome       = "tariffPriceHome"
 	TariffPriceLoadpoints = "tariffPriceLoadpoints"
 	Vehicles              = "vehicles"
-	PasswordConfigured    = "passwordConfigured"
-	Interval              = "interval"
+	Circuits              = "circuits"
+	Ext                   = "ext"
 
 	// meters
 	GridMeter     = "gridMeter"
 	PvMeters      = "pvMeters"
 	BatteryMeters = "batteryMeters"
+	ExtMeters     = "extMeters"
 	AuxMeters     = "auxMeters"
 
 	// battery settings
 	BatteryCapacity         = "batteryCapacity"
 	BatteryDischargeControl = "batteryDischargeControl"
+	BatteryGridChargeLimit  = "batteryGridChargeLimit"
+	BatteryGridChargeActive = "batteryGridChargeActive"
 	BufferSoc               = "bufferSoc"
 	BufferStartSoc          = "bufferStartSoc"
 

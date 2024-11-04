@@ -175,7 +175,8 @@ export default {
 				0,
 				this.capacity || 100,
 				this.socPerKwh,
-				this.fmtKWh,
+				this.fmtWh,
+				this.fmtPercentage,
 				"-"
 			);
 			// remove the first entry (0)

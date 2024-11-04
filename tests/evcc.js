@@ -1,24 +1,57 @@
 import fs from "fs";
 import waitOn from "wait-on";
 import axios from "axios";
-import { exec, execSync } from "child_process";
-import playwrightConfig from "../playwright.config.js";
+import { spawn, execSync } from "child_process";
+import os from "os";
+import path from "path";
+import { Transform } from "stream";
 
-const BASE_URL = playwrightConfig.use.baseURL;
-
-const DB_PATH = "./evcc.db";
 const BINARY = "./evcc";
+
+function workerPort() {
+  const index = process.env.TEST_WORKER_INDEX * 1;
+  return 11000 + index;
+}
+
+function logPrefix() {
+  return `[worker:${process.env.TEST_WORKER_INDEX}]`;
+}
+
+function createSteamLog() {
+  return new Transform({
+    transform(chunk, encoding, callback) {
+      const lines = chunk.toString().split("\n");
+      lines.forEach((line) => {
+        if (line.trim()) log(line);
+      });
+      callback();
+    },
+  });
+}
+
+function log(...args) {
+  console.log(logPrefix(), ...args);
+}
+
+export function baseUrl() {
+  return `http://localhost:${workerPort()}`;
+}
+
+function dbPath() {
+  const file = `evcc-${workerPort()}.db`;
+  return path.join(os.tmpdir(), file);
+}
 
 export async function start(config, sqlDumps) {
   await _clean();
   if (sqlDumps) {
     await _restoreDatabase(sqlDumps);
   }
-  await _start(config);
+  return await _start(config);
 }
 
-export async function stop() {
-  await _stop();
+export async function stop(instance) {
+  await _stop(instance);
   await _clean();
 }
 
@@ -39,35 +72,56 @@ export async function cleanRestart(config, sqlDumps) {
 async function _restoreDatabase(sqlDumps) {
   const dumps = Array.isArray(sqlDumps) ? sqlDumps : [sqlDumps];
   for (const dump of dumps) {
-    console.log("loading database", dump);
-    execSync(`sqlite3 ${DB_PATH} < tests/${dump}`);
+    log("loading database", dbPath(), dump);
+    execSync(`sqlite3 ${dbPath()} < tests/${dump}`);
   }
 }
 
 async function _start(config) {
-  console.log("starting evcc", { config });
-  const instance = exec(`EVCC_DATABASE_DSN=${DB_PATH} ${BINARY} --config tests/${config}`);
-  instance.stdout.pipe(process.stdout);
-  instance.stderr.pipe(process.stderr);
-  instance.on("exit", (code) => {
-    if (code !== 0) {
-      throw new Error("evcc terminated", code);
-    }
+  const configFile = config.includes("/") ? config : `tests/${config}`;
+  const port = workerPort();
+  log(`wait until port ${port} is available`);
+  // wait for port to be available
+  await waitOn({ resources: [`tcp:${port}`], reverse: true, log: true });
+  log("starting evcc", { config, port });
+  const instance = spawn(BINARY, ["--config", configFile], {
+    env: { EVCC_NETWORK_PORT: port.toString(), EVCC_DATABASE_DSN: dbPath() },
+    stdio: ["pipe", "pipe", "pipe"],
   });
-  await waitOn({ resources: [BASE_URL] });
+  const steamLog = createSteamLog();
+  instance.stdout.pipe(steamLog);
+  instance.stderr.pipe(steamLog);
+  instance.on("exit", (code) => {
+    log("evcc terminated", { code, port, config });
+    steamLog.end();
+  });
+  await waitOn({ resources: [baseUrl()], log: true });
+  return instance;
 }
 
-async function _stop() {
-  console.log("shutting down evcc");
-  const res = await axios.post(BASE_URL + "/api/auth/login", { password: "secret" });
-  console.log(res.status, res.statusText);
+async function _stop(instance) {
+  const port = workerPort();
+  if (instance) {
+    log("shutting down evcc hard", { port });
+    instance.kill("SIGKILL");
+    await waitOn({ resources: [`tcp:${port}`], reverse: true, log: true });
+    log("evcc is down", { port });
+    return;
+  }
+  log("shutting down evcc", { port });
+  const res = await axios.post(`${baseUrl()}/api/auth/login`, { password: "secret" });
+  log(res.status, res.statusText);
   const cookie = res.headers["set-cookie"];
-  await axios.post(BASE_URL + "/api/system/shutdown", {}, { headers: { cookie } });
+  await axios.post(`${baseUrl()}/api/system/shutdown`, {}, { headers: { cookie } });
+  log(`wait until port ${port} is closed`);
+  await waitOn({ resources: [`tcp:${port}`], reverse: true, log: true });
+  log("evcc is down", { port });
 }
 
 async function _clean() {
-  if (fs.existsSync(DB_PATH)) {
-    console.log("delete database", DB_PATH);
-    fs.unlinkSync(DB_PATH);
+  const db = dbPath();
+  if (fs.existsSync(db)) {
+    log("delete database", db);
+    fs.unlinkSync(db);
   }
 }

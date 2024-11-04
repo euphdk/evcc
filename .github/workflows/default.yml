@@ -1,7 +1,7 @@
 name: Default
 
 env:
-  GO_VERSION: ^1.22
+  GO_VERSION: ^1.23
 
 on:
   push:
@@ -74,7 +74,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: "npm"
 
       - run: mkdir dist && touch dist/empty
@@ -134,11 +134,9 @@ jobs:
       - run: mkdir dist && touch dist/empty
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v4
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          skip-pkg-cache: true
-          skip-build-cache: true
           args: --out-format=colored-line-number --timeout 5m
 
   ui:
@@ -150,7 +148,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: "npm"
 
       - name: Install
@@ -179,11 +177,6 @@ jobs:
   integration:
     name: Integration
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shardIndex: [1, 2]
-        shardTotal: [2]
 
     steps:
       - uses: actions/checkout@v4
@@ -206,7 +199,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "22"
           cache: "npm"
 
       - name: Build UI
@@ -226,7 +219,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run tests
-        run: npx playwright test --shard=${{ matrix.shardIndex }}/${{ matrix.shardTotal }}
+        run: npx playwright test
 
       # - name: Run tests
       #   uses: docker://mcr.microsoft.com/playwright:v1.34.3-jammy
@@ -236,6 +229,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: playwright-report-${{ matrix.shardIndex }}
+          name: playwright-report
           path: playwright-report/
           retention-days: 14

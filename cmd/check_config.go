@@ -11,7 +11,10 @@ import (
 var checkconfig = &cobra.Command{
 	Use:   "checkconfig",
 	Short: "Check config file for errors",
-	Run:   runConfigCheck,
+	Long: `Check the (specified or default) config file for errors. Note that
+	       checkconfig only checks the config file for parsing errors and does
+		   not check that individual device configurations are valid.`,
+	Run: runConfigCheck,
 }
 
 func init() {
@@ -19,7 +22,7 @@ func init() {
 }
 
 func runConfigCheck(cmd *cobra.Command, args []string) {
-	err := loadConfigFile(&conf)
+	err := loadConfigFile(&conf, !cmd.Flag(flagIgnoreDatabase).Changed)
 
 	if err != nil {
 		log.FATAL.Println("config invalid:", err)

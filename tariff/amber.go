@@ -69,7 +69,7 @@ func NewAmberFromConfig(other map[string]interface{}) (api.Tariff, error) {
 	t.Client.Transport = &transport.Decorator{
 		Base: t.Client.Transport,
 		Decorator: transport.DecorateHeaders(map[string]string{
-			"Authorization": fmt.Sprintf("Bearer %s", cc.Token),
+			"Authorization": "Bearer " + cc.Token,
 		}),
 	}
 
@@ -82,7 +82,6 @@ func NewAmberFromConfig(other map[string]interface{}) (api.Tariff, error) {
 
 func (t *Amber) run(done chan error) {
 	var once sync.Once
-	bo := newBackoff()
 
 	tick := time.NewTicker(time.Minute)
 	for ; true; <-tick.C {
@@ -91,7 +90,7 @@ func (t *Amber) run(done chan error) {
 
 		if err := backoff.Retry(func() error {
 			return backoffPermanentError(t.GetJSON(uri, &res))
-		}, bo); err != nil {
+		}, bo()); err != nil {
 			once.Do(func() { done <- err })
 
 			t.log.ERROR.Println(err)
@@ -109,12 +108,14 @@ func (t *Amber) run(done chan error) {
 					End:   endTime.Local(),
 					Price: r.PerKwh / 1e2,
 				}
+				if r.AdvancedPrice != nil {
+					ar.Price = r.AdvancedPrice.Predicted / 1e2
+				}
 				data = append(data, ar)
 			}
 		}
-		data.Sort()
 
-		t.data.Set(data)
+		mergeRates(t.data, data)
 		once.Do(func() { close(done) })
 	}
 }

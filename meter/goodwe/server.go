@@ -2,13 +2,14 @@ package goodwe
 
 import (
 	"encoding/binary"
+	"maps"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/evcc-io/evcc/util"
-	"golang.org/x/exp/maps"
 )
 
 var (
@@ -60,13 +61,13 @@ func (m *Server) GetInverter(ip string) *util.Monitor[Inverter] {
 }
 
 func (m *Server) readData() {
-	bo := backoff.NewExponentialBackOff()
-	bo.MaxInterval = time.Second
-	bo.MaxElapsedTime = 10 * time.Second
+	bo := backoff.NewExponentialBackOff(
+		backoff.WithMaxInterval(time.Second),
+		backoff.WithMaxElapsedTime(10*time.Second))
 
 	for {
 		mu.RLock()
-		ips := maps.Keys(m.inverters)
+		ips := slices.Collect(maps.Keys(m.inverters))
 		mu.RUnlock()
 
 		for _, ip := range ips {
@@ -110,7 +111,7 @@ func (m *Server) listen() {
 					return float64(int16(binary.BigEndian.Uint16(buf[u:]))) *
 						float64(int16(binary.BigEndian.Uint16(buf[i:]))) / 100
 				}
-				inverter.PvPower = ui(11, 13) + ui(19, 21)
+				inverter.PvPower = ui(11, 13) + ui(19, 21) + ui(27, 29) + ui(35, 37)
 				inverter.BatteryPower = ui(165, 167)
 				inverter.NetPower = -float64(int32(binary.BigEndian.Uint32(buf[83:])))
 			}

@@ -1,16 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { start, stop } from "./evcc";
-import { startSimulator, stopSimulator } from "./simulator";
+import { start, stop, baseUrl } from "./evcc";
+import { startSimulator, stopSimulator, simulatorConfig } from "./simulator";
+import { login } from "./utils";
 
 const BASICS_CONFIG = "basics.evcc.yaml";
-const SIMULATOR_CONFIG = "simulator.evcc.yaml";
 
 const UI_ROUTES = ["/", "/#/sessions", "/#/config"];
 
-async function login(page) {
-  await page.locator("#loginPassword").fill("secret");
-  await page.getByRole("button", { name: "Login" }).click();
-}
+test.use({ baseURL: baseUrl() });
 
 test.describe("Basics", async () => {
   test.beforeAll(async () => {
@@ -55,13 +52,13 @@ test.describe("Basics", async () => {
 
 test.describe("Advanced", async () => {
   test.beforeAll(async () => {
-    await start(SIMULATOR_CONFIG, "password.sql");
     await startSimulator();
+    await start(simulatorConfig(), "password.sql");
   });
 
   test.afterAll(async () => {
-    await stopSimulator();
     await stop();
+    await stopSimulator();
   });
 
   test("Menu options. All available.", async ({ page }) => {

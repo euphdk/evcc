@@ -2,7 +2,11 @@
 	<div
 		class="container container--loadpoint px-0 mb-md-2 d-flex flex-column justify-content-center"
 	>
-		<div ref="carousel" class="carousel d-lg-flex flex-wrap">
+		<div
+			ref="carousel"
+			class="carousel d-lg-flex flex-wrap"
+			:class="`carousel--${loadpoints.length}`"
+		>
 			<div
 				v-for="(loadpoint, index) in loadpoints"
 				:key="index"
@@ -17,7 +21,10 @@
 					:tariffGrid="tariffGrid"
 					:tariffCo2="tariffCo2"
 					:currency="currency"
-					:multiple-loadpoints="loadpoints.length > 1"
+					:multipleLoadpoints="loadpoints.length > 1"
+					:gridConfigured="gridConfigured"
+					:pvConfigured="pvConfigured"
+					:batteryConfigured="batteryConfigured"
 					class="h-100"
 					:class="{ 'loadpoint-unselected': !selected(index) }"
 					@click="scrollTo(index)"
@@ -54,17 +61,18 @@ import "@h2d2/shopicons/es/filled/lightning";
 import Loadpoint from "./Loadpoint.vue";
 
 export default {
-	name: "Site",
+	name: "Loadpoints",
 	components: { Loadpoint },
 	props: {
 		loadpoints: Array,
 		vehicles: Array,
-		smartCostLimit: Number,
 		smartCostType: String,
-		smartCostActive: Boolean,
 		tariffGrid: Number,
 		tariffCo2: Number,
 		currency: String,
+		gridConfigured: Boolean,
+		pvConfigured: Boolean,
+		batteryConfigured: Boolean,
 	},
 	data() {
 		return { selectedIndex: 0, snapTimeout: null };
@@ -188,12 +196,28 @@ export default {
 	}
 }
 
-/* breakpoint lg */
+/* breakpoint lg, 2-col grid */
 @media (min-width: 992px) {
 	.carousel {
 		display: grid !important;
 		grid-gap: 2rem;
 		grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+	}
+}
+
+/* breakpoint lg, tall screen, 2 loadpoints rows */
+@media (min-width: 992px) and (min-height: 1450px) {
+	.carousel--2 {
+		grid-gap: 4rem;
+		grid-template-columns: 1fr;
+	}
+}
+
+/* breakpoint lg, taller screen, 3 loadpoints rows */
+@media (min-width: 992px) and (min-height: 1900px) {
+	.carousel--3 {
+		grid-gap: 4rem;
+		grid-template-columns: 1fr;
 	}
 }
 </style>

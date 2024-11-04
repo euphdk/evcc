@@ -17,16 +17,22 @@
 			<Energyflow v-bind="energyflow" />
 		</div>
 		<div class="d-flex flex-column justify-content-between content-area">
+			<div v-if="fatal" class="flex-grow-1 align-items-center d-flex justify-content-center">
+				<h1 class="mb-5 text-gray fs-4">{{ $t("startupError.title") }}</h1>
+			</div>
 			<Loadpoints
+				v-else
 				class="mt-1 mt-sm-2 flex-grow-1"
 				:loadpoints="loadpoints"
 				:vehicles="vehicleList"
-				:smartCostLimit="smartCostLimit"
 				:smartCostType="smartCostType"
-				:smartCostActive="smartCostActive"
 				:tariffGrid="tariffGrid"
 				:tariffCo2="tariffCo2"
 				:currency="currency"
+				:gridConfigured="gridConfigured"
+				:pvConfigured="pvConfigured"
+				:batteryConfigured="batteryConfigured"
+				:batterySoc="batterySoc"
 			/>
 			<Footer v-bind="footer"></Footer>
 		</div>
@@ -68,7 +74,8 @@ export default {
 		batteryPower: Number,
 		batterySoc: Number,
 		batteryDischargeControl: Boolean,
-		batterySmartCostLimit: Number,
+		batteryGridChargeLimit: { type: Number, default: null },
+		batteryGridChargeActive: Boolean,
 		batteryMode: String,
 		battery: Array,
 		gridCurrents: Array,
@@ -95,11 +102,9 @@ export default {
 		hasUpdater: Boolean,
 		uploadMessage: String,
 		uploadProgress: Number,
-		sponsor: String,
-		sponsorTokenExpires: Number,
-		smartCostLimit: Number,
+		sponsor: { type: Object, default: () => ({}) },
 		smartCostType: String,
-		smartCostActive: Boolean,
+		fatal: Object,
 	},
 	computed: {
 		batteryConfigured: function () {
@@ -146,8 +151,8 @@ export default {
 					uploadMessage: this.uploadMessage,
 					uploadProgress: this.uploadProgress,
 				},
-				sponsor: this.sponsor,
 				savings: {
+					sponsor: this.sponsor,
 					statistics: this.statistics,
 					co2Configured: this.tariffCo2 !== undefined,
 					priceConfigured: this.tariffGrid !== undefined,
@@ -166,5 +171,7 @@ export default {
 .content-area {
 	flex-grow: 1;
 	z-index: 1;
+}
+.fatal {
 }
 </style>

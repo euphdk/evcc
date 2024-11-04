@@ -7,7 +7,7 @@
 		<HelpModal />
 		<PasswordModal />
 		<LoginModal />
-		<OfflineIndicator v-if="offline" />
+		<OfflineIndicator v-bind="offlineIndicatorProps" />
 	</div>
 </template>
 
@@ -20,11 +20,10 @@ import PasswordModal from "../components/PasswordModal.vue";
 import LoginModal from "../components/LoginModal.vue";
 import HelpModal from "../components/HelpModal.vue";
 import collector from "../mixins/collector";
-import { updateAuthStatus } from "../auth";
 
-// assume offline if not data received for 60 seconds
+// assume offline if not data received for 5 minutes
 let lastDataReceived = new Date();
-const maxDataAge = 60 * 1000;
+const maxDataAge = 60 * 1000 * 5;
 setInterval(() => {
 	if (new Date() - lastDataReceived > maxDataAge) {
 		console.log("no data received, assume we are offline");
@@ -54,26 +53,6 @@ export default {
 		const siteTitle = store.state.siteTitle;
 		return { title: siteTitle ? `${siteTitle} | evcc` : "evcc" };
 	},
-	watch: {
-		version: function (now, prev) {
-			if (!!prev && !!now) {
-				console.log("new version detected. reloading browser", { now, prev });
-				this.reload();
-			}
-		},
-		offline: function () {
-			updateAuthStatus();
-		},
-		startupErrors: function (now, prev) {
-			if (now) {
-				console.log("startup errors detected. redirecting to error page");
-				this.$router.push("/error");
-			} else {
-				console.log("startup errors resolved. redirecting to home page");
-				this.$router.push("/");
-			}
-		},
-	},
 	computed: {
 		version: function () {
 			return store.state.version;
@@ -87,14 +66,27 @@ export default {
 		batterySettingsProps() {
 			return this.collectProps(BatterySettingsModal, store.state);
 		},
-		startupErrors: function () {
-			return store.state.fatal?.length > 0;
+		offlineIndicatorProps() {
+			return this.collectProps(OfflineIndicator, store.state);
+		},
+	},
+	watch: {
+		version: function (now, prev) {
+			if (!!prev && !!now) {
+				console.log("new version detected. reloading browser", { now, prev });
+				this.reload();
+			}
+		},
+		offline: function (offline) {
+			store.offline(offline);
+			if (offline) {
+				this.reconnect();
+			}
 		},
 	},
 	mounted: function () {
 		this.connect();
 		document.addEventListener("visibilitychange", this.pageVisibilityChanged, false);
-		updateAuthStatus();
 	},
 	unmounted: function () {
 		this.disconnect();
@@ -108,7 +100,6 @@ export default {
 				this.disconnect();
 			} else {
 				this.connect();
-				updateAuthStatus();
 			}
 		},
 		reconnect: function () {
@@ -119,7 +110,6 @@ export default {
 			}, 2500);
 		},
 		disconnect: function () {
-			console.log("websocket disconnecting");
 			if (this.ws) {
 				this.ws.onerror = null;
 				this.ws.onopen = null;
@@ -156,7 +146,7 @@ export default {
 
 			this.ws = new WebSocket(uri);
 			this.ws.onerror = () => {
-				console.error({ message: "Websocket error. Trying to reconnect." });
+				console.log({ message: "Websocket error. Trying to reconnect." });
 				this.ws.close();
 			};
 			this.ws.onopen = () => {
@@ -164,13 +154,12 @@ export default {
 				window.app.setOnline();
 			};
 			this.ws.onclose = () => {
-				console.log("websocket disconnected");
 				window.app.setOffline();
 				this.reconnect();
 			};
 			this.ws.onmessage = (evt) => {
 				try {
-					var msg = JSON.parse(evt.data);
+					const msg = JSON.parse(evt.data);
 					store.update(msg);
 					lastDataReceived = new Date();
 				} catch (error) {

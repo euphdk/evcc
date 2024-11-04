@@ -87,10 +87,12 @@ func (lp *Loadpoint) plannerActive() (active bool) {
 		lp.setPlanActive(active)
 	}()
 
-	var planStart time.Time
+	var planStart, planEnd time.Time
 	var planOverrun time.Duration
+
 	defer func() {
 		lp.publish(keys.PlanProjectedStart, planStart)
+		lp.publish(keys.PlanProjectedEnd, planEnd)
 		lp.publish(keys.PlanOverrun, planOverrun)
 	}()
 
@@ -98,7 +100,10 @@ func (lp *Loadpoint) plannerActive() (active bool) {
 	if planTime.IsZero() {
 		return false
 	}
-	if lp.clock.Until(planTime) < 0 && !lp.planActive {
+
+	// keep overrunning plans as long as a vehicle is connected
+	if lp.clock.Until(planTime) < 0 && (!lp.planActive || !lp.connected()) {
+		lp.log.DEBUG.Println("plan: deleting expired plan")
 		lp.deletePlan()
 		return false
 	}
@@ -129,6 +134,7 @@ func (lp *Loadpoint) plannerActive() (active bool) {
 	}
 
 	planStart = planner.Start(plan)
+	planEnd = planner.End(plan)
 	lp.log.DEBUG.Printf("plan: charge %v between %v until %v (%spower: %.0fW, avg cost: %.3f)",
 		planner.Duration(plan).Round(time.Second), planStart.Round(time.Second).Local(), planTime.Round(time.Second).Local(), overrun,
 		maxPower, planner.AverageCost(plan))

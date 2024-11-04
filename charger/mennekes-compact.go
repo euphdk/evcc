@@ -83,7 +83,7 @@ func NewMennekesCompactFromConfig(other map[string]interface{}) (api.Charger, er
 		return nil, err
 	}
 
-	return NewMennekesCompact(cc.URI, cc.Device, cc.Comset, cc.Baudrate, modbus.ProtocolFromRTU(cc.RTU), cc.ID, cc.Timeout)
+	return NewMennekesCompact(cc.URI, cc.Device, cc.Comset, cc.Baudrate, cc.Settings.Protocol(), cc.ID, cc.Timeout)
 }
 
 // NewMennekesCompact creates Mennekes charger
@@ -248,8 +248,8 @@ func (wb *MennekesCompact) ChargedEnergy() (float64, error) {
 
 var _ api.ChargeTimer = (*MennekesCompact)(nil)
 
-// ChargingTime implements the api.ChargeTimer interface
-func (wb *MennekesCompact) ChargingTime() (time.Duration, error) {
+// ChargeDuration implements the api.ChargeTimer interface
+func (wb *MennekesCompact) ChargeDuration() (time.Duration, error) {
 	b, err := wb.conn.ReadHoldingRegisters(mennekesRegDurationSession, 2)
 	if err != nil {
 		return 0, err

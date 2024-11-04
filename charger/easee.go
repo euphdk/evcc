@@ -50,7 +50,7 @@ type Easee struct {
 	log                     *util.Logger
 	mux                     sync.RWMutex
 	lastEnergyPollMux       sync.Mutex
-	done                    chan struct{}
+	maxChargerCurrent       float64
 	dynamicChargerCurrent   float64
 	current                 float64
 	chargerEnabled          bool
@@ -71,14 +71,14 @@ type Easee struct {
 	obsC       chan easee.Observation
 	obsTime    map[easee.ObservationID]time.Time
 	stopTicker chan struct{}
-	once       sync.Once
+	startDone  func()
 }
 
 func init() {
 	registry.Add("easee", NewEaseeFromConfig)
 }
 
-// NewEaseeFromConfig creates a go-e charger from generic config
+// NewEaseeFromConfig creates a Easee charger from generic config
 func NewEaseeFromConfig(other map[string]interface{}) (api.Charger, error) {
 	cc := struct {
 		User      string
@@ -109,13 +109,15 @@ func NewEasee(user, password, charger string, timeout time.Duration, authorize b
 		return nil, api.ErrSponsorRequired
 	}
 
+	done := make(chan struct{})
+
 	c := &Easee{
 		Helper:    request.NewHelper(log),
 		charger:   charger,
 		authorize: authorize,
 		log:       log,
 		current:   6, // default current
-		done:      make(chan struct{}),
+		startDone: sync.OnceFunc(func() { close(done) }),
 		cmdC:      make(chan easee.SignalRCommandResponse),
 		obsC:      make(chan easee.Observation),
 		obsTime:   make(map[easee.ObservationID]time.Time),
@@ -171,6 +173,9 @@ func NewEasee(user, password, charger string, timeout time.Duration, authorize b
 
 	client, err := signalr.NewClient(context.Background(),
 		signalr.WithConnector(c.connect(ts)),
+		signalr.WithBackoff(func() backoff.BackOff {
+			return backoff.NewExponentialBackOff(backoff.WithMaxElapsedTime(0)) // prevents SignalR stack to silently give up after 15 mins
+		}),
 		signalr.WithReceiver(c),
 		signalr.Logger(easee.SignalrLogger(c.log.TRACE), false),
 	)
@@ -187,7 +192,7 @@ func NewEasee(user, password, charger string, timeout time.Duration, authorize b
 
 	// wait for first update
 	select {
-	case <-c.done:
+	case <-done:
 	case <-time.After(request.Timeout):
 		err = os.ErrDeadlineExceeded
 	}
@@ -204,8 +209,7 @@ func (c *Easee) chargerSite(charger string) (easee.Site, error) {
 
 // connect creates an HTTP connection to the signalR hub
 func (c *Easee) connect(ts oauth2.TokenSource) func() (signalr.Connection, error) {
-	bo := backoff.NewExponentialBackOff()
-	bo.MaxInterval = time.Minute
+	bo := backoff.NewExponentialBackOff(backoff.WithMaxInterval(time.Minute))
 
 	return func() (conn signalr.Connection, err error) {
 		defer func() {
@@ -226,9 +230,9 @@ func (c *Easee) connect(ts oauth2.TokenSource) func() (signalr.Connection, error
 
 		return signalr.NewHTTPConnection(ctx, "https://streams.easee.com/hubs/chargers",
 			signalr.WithHTTPClient(c.Client),
-			signalr.WithHTTPHeaders(func() (res http.Header) {
+			signalr.WithHTTPHeaders(func() http.Header {
 				return http.Header{
-					"Authorization": []string{fmt.Sprintf("Bearer %s", tok.AccessToken)},
+					"Authorization": []string{"Bearer " + tok.AccessToken},
 				}
 			}),
 		)
@@ -310,7 +314,9 @@ func (c *Easee) ProductUpdate(i json.RawMessage) {
 	case easee.PHASE_MODE:
 		c.phaseMode = value.(int)
 	case easee.OUTPUT_PHASE:
-		c.outputPhase = value.(int) / 10 //API gives 0,10,30 for 0,1,3p
+		c.outputPhase = value.(int) / 10 // API gives 0,10,30 for 0,1,3p
+	case easee.MAX_CHARGER_CURRENT:
+		c.maxChargerCurrent = value.(float64)
 	case easee.DYNAMIC_CHARGER_CURRENT:
 		c.dynamicChargerCurrent = value.(float64)
 
@@ -364,7 +370,7 @@ func (c *Easee) ProductUpdate(i json.RawMessage) {
 		c.opMode = opMode
 
 		// startup completed
-		c.once.Do(func() { close(c.done) })
+		c.startDone()
 
 	case easee.REASON_FOR_NO_CURRENT:
 		c.reasonForNoCurrent = value.(int)
@@ -646,6 +652,9 @@ func (c *Easee) waitForDynamicChargerCurrent(targetCurrent float64) error {
 // MaxCurrent implements the api.Charger interface
 func (c *Easee) MaxCurrent(current int64) error {
 	cur := float64(current)
+	if c.maxChargerCurrent != 0 {
+		cur = min(cur, c.maxChargerCurrent)
+	}
 	data := easee.ChargerSettings{
 		DynamicChargerCurrent: &cur,
 	}
@@ -777,7 +786,7 @@ func (c *Easee) Phases1p3p(phases int) error {
 	} else {
 		// charger level
 		if phases == 3 {
-			phases = 2 // mode 2 means 3p
+			phases = 2 // mode 2 means auto
 		}
 
 		// change phaseMode only if necessary
@@ -791,10 +800,9 @@ func (c *Easee) Phases1p3p(phases int) error {
 			if _, err = c.postJSONAndWait(uri, data); err != nil {
 				return err
 			}
-
-			// disable charger to activate changed settings (loadpoint will reenable it)
-			err = c.Enable(false)
 		}
+		// disable charger to activate changed settings (loadpoint will reenable it)
+		err = c.Enable(false)
 	}
 
 	return err
